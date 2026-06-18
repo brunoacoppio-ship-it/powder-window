@@ -1,67 +1,94 @@
 import { useEffect, useMemo, useState } from "react";
 import { RESORTS } from "../data/resorts";
 import { computeSeasonalScore, type SeasonalResult } from "../engine/seasonalScore";
-import { fetchForecastBase, leadDaysTo } from "../data/liveRefine";
+import { fetchForecast, clearForecastCache } from "../data/forecastClient";
+import { computeScore, DEFAULT_WEIGHTS } from "../scoring/score";
+import { leadDaysTo } from "../data/liveRefine";
+
+export type DataMode = "forecast" | "seasonal";
 
 export interface OutlookRow {
   resort: (typeof RESORTS)[number];
-  result: SeasonalResult;
+  result: SeasonalResult | null;
+  forecastScore?: number;
+  freshSnowCm?: number;
+  baseDepthCm?: number;
+  meanTempC?: number;
+  freezingLevelM?: number;
+  confidence?: number;
   rank: number;
+  mode: DataMode;
 }
 
-/** Mid-month date — the representative target for a monthly outlook. */
-export function targetDateFor(year: number, month: number): string {
-  return `${year}-${String(month).padStart(2, "0")}-15`;
-}
-
-export function useSeasonalOutlook(year: number, month: number, region: string | null) {
-  const targetDate = targetDateFor(year, month);
+export function useSeasonalOutlook(targetDate: string, region: string | null) {
   const leadDays = leadDaysTo(targetDate);
+  const mode: DataMode = leadDays <= 15 ? "forecast" : "seasonal";
+  const today = new Date().toISOString().slice(0, 10);
 
-  // Seasonal baseline — synchronous, always available, runs offline.
-  const base = useMemo(() => {
-    const resorts = region ? RESORTS.filter((r) => r.region === region) : RESORTS;
-    return resorts.map((resort) => ({
-      resort,
-      result: computeSeasonalScore(resort),
-    }));
-  }, [region]);
+  const resorts = useMemo(
+    () => (region ? RESORTS.filter((r) => r.region === region) : RESORTS),
+    [region]
+  );
 
   const [rows, setRows] = useState<OutlookRow[]>([]);
-  const [refining, setRefining] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    const ranked = (forecastBases: Map<string, number>) =>
-      base
-        .map(({ resort, result }) => {
-          const fb = forecastBases.get(resort.id);
-          const r = fb != null ? computeSeasonalScore(resort, { forecastBase: fb }) : result;
-          return { resort, result: r };
-        })
-        .sort((a, b) => b.result.score - a.result.score)
-        .map((row, i) => ({ ...row, rank: i + 1 }));
+    let cancelled = false;
+    clearForecastCache();
+    setLoading(true);
+    setProgress(0);
+    setRows([]);
 
-    setRows(ranked(new Map()));
+    const run = async () => {
+      const out: Omit<OutlookRow, "rank">[] = [];
 
-    // Inside the 16-day window, pull live forecasts to collapse the bands.
-    if (leadDays <= 15) {
-      let cancelled = false;
-      setRefining(true);
-      Promise.all(
-        base.map(async ({ resort }) => {
-          const fb = await fetchForecastBase(resort.lat, resort.lon, targetDate);
-          return [resort.id, fb] as const;
-        })
-      ).then((pairs) => {
+      for (let i = 0; i < resorts.length; i++) {
         if (cancelled) return;
-        const m = new Map<string, number>();
-        for (const [id, fb] of pairs) if (fb != null) m.set(id, fb);
-        if (m.size) setRows(ranked(m));
-        setRefining(false);
-      });
-      return () => { cancelled = true; };
-    }
-  }, [base, targetDate, leadDays]);
+        const resort = resorts[i];
 
-  return { rows, leadDays, targetDate, refining };
+        if (mode === "forecast") {
+          try {
+            const fc = await fetchForecast(resort.lat, resort.lon, resort.id);
+            const sc = computeScore(resort, targetDate, fc.hourly, DEFAULT_WEIGHTS, today);
+            out.push({
+              resort, result: null, mode: "forecast",
+              forecastScore: sc.total,
+              freshSnowCm: sc.freshSnowCm,
+              baseDepthCm: sc.baseDepthCm,
+              meanTempC: sc.meanTempC,
+              freezingLevelM: sc.freezingLevelM,
+              confidence: sc.confidence,
+            });
+          } catch {
+            // skip on network failure
+          }
+        } else {
+          const result = computeSeasonalScore(resort);
+          out.push({ resort, result, mode: "seasonal" });
+        }
+
+        if (!cancelled) setProgress((i + 1) / resorts.length);
+      }
+
+      if (cancelled) return;
+
+      const sorted = out
+        .sort((a, b) => {
+          const sa = a.mode === "forecast" ? (a.forecastScore ?? 0) : (a.result?.score ?? 0);
+          const sb = b.mode === "forecast" ? (b.forecastScore ?? 0) : (b.result?.score ?? 0);
+          return sb - sa;
+        })
+        .map((r, i) => ({ ...r, rank: i + 1 }));
+
+      setRows(sorted);
+      setLoading(false);
+    };
+
+    run().catch(() => setLoading(false));
+    return () => { cancelled = true; };
+  }, [targetDate, mode, resorts, today]);
+
+  return { rows, loading, progress, mode, leadDays };
 }
