@@ -1,6 +1,7 @@
-import { useState, useEffect, type CSSProperties } from "react";
+import { useState, useEffect, Fragment, type CSSProperties } from "react";
 import { REGIONS } from "./data/resorts";
 import { useSeasonalOutlook } from "./hooks/useSeasonalOutlook";
+import { useMediaQuery } from "./hooks/useMediaQuery";
 import { ResortOutlookCard } from "./components/ResortOutlookCard";
 import { EnsoBanner } from "./components/EnsoBanner";
 import { ResortMap } from "./components/ResortMap";
@@ -12,8 +13,8 @@ maxDate.setFullYear(maxDate.getFullYear() + 1);
 const maxDateStr = maxDate.toISOString().slice(0, 10);
 
 const inputStyle: CSSProperties = {
-  font: "inherit", fontSize: 14, color: "var(--ink)", background: "var(--surface-2)",
-  border: "1px solid var(--line-strong)", borderRadius: 10, padding: "8px 12px", cursor: "pointer",
+  font: "inherit", fontSize: 15, color: "var(--ink)", background: "var(--surface-2)",
+  border: "1px solid var(--line-strong)", borderRadius: 10, padding: "10px 12px", cursor: "pointer",
 };
 
 function horizonLabel(leadDays: number, mode: "forecast" | "seasonal"): string {
@@ -28,40 +29,82 @@ export default function App() {
   const [region, setRegion] = useState<string | null>(null);
   const { rows, loading, progress, mode, leadDays } = useSeasonalOutlook(targetDate, region);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const isMobile = useMediaQuery("(max-width: 860px)");
 
-  // Keep a valid selection: default to the top-ranked resort
+  // Selection rules differ by layout:
+  //  - desktop: the side panel always shows something → default to #1
+  //  - mobile: start collapsed (clean list); tapping opens, re-tapping closes
   useEffect(() => {
     if (rows.length === 0) { setSelectedId(null); return; }
-    if (!selectedId || !rows.some((r) => r.resort.id === selectedId)) {
-      setSelectedId(rows[0].resort.id);
+    if (selectedId && !rows.some((r) => r.resort.id === selectedId)) {
+      setSelectedId(null); // drop a selection that left the list (e.g. region filter)
+      return;
     }
-  }, [rows, selectedId]);
+    if (!isMobile && !selectedId) setSelectedId(rows[0].resort.id);
+  }, [rows, selectedId, isMobile]);
 
   const selected = rows.find((r) => r.resort.id === selectedId) ?? null;
 
+  const list = loading && rows.length === 0
+    ? Array.from({ length: 7 }).map((_, i) => (
+        <div key={i} className="glass skeleton" style={{ height: 74 }} />
+      ))
+    : rows.map((row) => {
+        const isSel = row.resort.id === selectedId;
+        const card = (
+          <ResortOutlookCard
+            row={row}
+            selected={isSel}
+            onSelect={() => setSelectedId(isMobile && isSel ? null : row.resort.id)}
+          />
+        );
+        // Mobile: detail opens inline right under the tapped card (accordion)
+        if (isMobile) {
+          return (
+            <Fragment key={row.resort.id}>
+              {card}
+              {isSel && selected && <DetailPanel row={selected} targetDate={targetDate} />}
+            </Fragment>
+          );
+        }
+        return <Fragment key={row.resort.id}>{card}</Fragment>;
+      });
+
+  const mapBlock = (
+    <div className="glass" style={{ height: isMobile ? 280 : 380, padding: 6, overflow: "hidden" }}>
+      <ResortMap rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+    </div>
+  );
+
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 24px 70px" }}>
+    <div style={{ maxWidth: 1200, margin: "0 auto", padding: isMobile ? "26px 14px 56px" : "40px 24px 70px" }}>
       {/* Header */}
-      <header style={{ marginBottom: 22 }}>
+      <header style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 32 }}>🏔️</span>
-              <h1 style={{ fontFamily: "var(--font-display)", fontSize: 38, fontWeight: 700, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+              <span style={{ fontSize: isMobile ? 27 : 32 }}>🏔️</span>
+              <h1 style={{ fontFamily: "var(--font-display)", fontSize: isMobile ? 28 : 38, fontWeight: 700, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 }}>
                 Powder Window
               </h1>
             </div>
-            <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: 15 }}>
+            <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: isMobile ? 13.5 : 15 }}>
               Inteligência de neve nos Andes — previsão real e modelo sazonal.
             </p>
           </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{
+            display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+            width: isMobile ? "100%" : undefined,
+          }}>
             <input
-              type="date" style={inputStyle} value={targetDate}
-              min={today} max={maxDateStr}
+              type="date" value={targetDate} min={today} max={maxDateStr}
               onChange={(e) => e.target.value && setTargetDate(e.target.value)}
+              style={{ ...inputStyle, flex: isMobile ? "1 1 140px" : undefined }}
             />
-            <select style={inputStyle} value={region ?? ""} onChange={(e) => setRegion(e.target.value || null)}>
+            <select
+              value={region ?? ""} onChange={(e) => setRegion(e.target.value || null)}
+              style={{ ...inputStyle, flex: isMobile ? "1 1 140px" : undefined }}
+            >
               <option value="">Todas as regiões</option>
               {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
@@ -86,35 +129,30 @@ export default function App() {
       </header>
 
       {mode === "seasonal" && (
-        <div style={{ marginBottom: 18 }}><EnsoBanner /></div>
+        <div style={{ marginBottom: 16 }}><EnsoBanner /></div>
       )}
 
-      {/* Main grid: list + map, then detail */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.05fr)", gap: 18, alignItems: "start" }}>
-        {/* Left: ranked list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {loading && rows.length === 0
-            ? Array.from({ length: 7 }).map((_, i) => (
-                <div key={i} className="glass skeleton" style={{ height: 74 }} />
-              ))
-            : rows.map((row) => (
-                <ResortOutlookCard
-                  key={row.resort.id}
-                  row={row}
-                  selected={row.resort.id === selectedId}
-                  onSelect={() => setSelectedId(row.resort.id)}
-                />
-              ))}
+      {isMobile ? (
+        /* Mobile: single column — map on top, list with inline detail */
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {mapBlock}
+          {!loading && (
+            <p style={{ margin: "0 2px", fontSize: 12, color: "var(--faint)" }}>
+              Toque num destino — no mapa ou na lista — para ver o detalhe.
+            </p>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{list}</div>
         </div>
-
-        {/* Right: map (sticky) */}
-        <div style={{ position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 18 }}>
-          <div className="glass" style={{ height: 380, padding: 6, overflow: "hidden" }}>
-            <ResortMap rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+      ) : (
+        /* Desktop: list left, sticky map + detail right */
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.05fr)", gap: 18, alignItems: "start" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>{list}</div>
+          <div style={{ position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 18 }}>
+            {mapBlock}
+            {selected && <DetailPanel row={selected} targetDate={targetDate} />}
           </div>
-          {selected && <DetailPanel row={selected} targetDate={targetDate} />}
         </div>
-      </div>
+      )}
 
       <footer style={{ marginTop: 34, paddingTop: 18, borderTop: "1px solid var(--line)", fontSize: 12.5, color: "var(--faint)", lineHeight: 1.6 }}>
         <strong style={{ fontWeight: 600, color: "var(--muted)" }}>Como a nota é calculada.</strong>{" "}

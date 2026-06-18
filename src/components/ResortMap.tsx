@@ -11,6 +11,20 @@ function FlyToSelected({ row }: { row: OutlookRow | null }) {
   return null;
 }
 
+// Leaflet renders grey tiles if the container resized while hidden/changed
+// (e.g. switching between mobile and desktop layouts). Recompute on resize.
+function InvalidateOnResize() {
+  const map = useMap();
+  useEffect(() => {
+    const fix = () => map.invalidateSize();
+    fix();
+    const t = setTimeout(fix, 250);
+    window.addEventListener("resize", fix);
+    return () => { clearTimeout(t); window.removeEventListener("resize", fix); };
+  }, [map]);
+  return null;
+}
+
 export function ResortMap({
   rows, selectedId, onSelect,
 }: {
@@ -58,6 +72,7 @@ export function ResortMap({
         );
       })}
       <FlyToSelected row={selected} />
+      <InvalidateOnResize />
     </MapContainer>
   );
 }

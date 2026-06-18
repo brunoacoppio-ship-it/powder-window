@@ -175,5 +175,5 @@ function ChartTip({ active, payload, label, unit }: {
 }
 
 const metricsGrid: CSSProperties = {
-  display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8,
+  display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: 8,
 };
