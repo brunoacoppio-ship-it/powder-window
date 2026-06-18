@@ -1,5 +1,5 @@
 import type { Resort } from "../data/resorts";
-import { CLIMATE, historicalSample, type ResortClimate } from "../data/climatology";
+import { CLIMATE, historicalSample, seasonalFactor, snowlineShift, type ResortClimate } from "../data/climatology";
 import { ONI_HISTORY, analogWeight, CURRENT_ONI } from "../data/enso";
 
 export type Confidence = "alta" | "média" | "baixa";
@@ -12,6 +12,8 @@ export interface Estimator {
 
 export interface SeasonalOpts {
   oni?: number;
+  /** Target date (YYYY-MM-DD). Drives the seasonal curve so July ≠ October. */
+  targetDate?: string;
   /** Live 16-day forecast base depth (cm), only meaningful inside the window. */
   forecastBase?: number;
   forecastSd?: number;
@@ -37,6 +39,7 @@ export interface SeasonalResult {
   qual: number;
   rainExposure: number;
   expectedSnowLine: number;
+  seasonFactor: number; // fraction of peak base for this date
   sources: string[];    // which estimators contributed
 }
 
@@ -92,8 +95,8 @@ export function fuse(estimators: Estimator[]): Estimator {
   return { mean: weightedSum / invSum, var: 1 / invSum };
 }
 
-function geographicQuality(c: ResortClimate, r: Resort, oni: number) {
-  const expectedSnowLine = c.snowLine + c.snowLineBeta * oni;
+function geographicQuality(c: ResortClimate, r: Resort, oni: number, snowLineOffset: number) {
+  const expectedSnowLine = c.snowLine + c.snowLineBeta * oni + snowLineOffset;
   const vertical = r.topElevation - r.baseElevation;
   let rainExposure = clamp((expectedSnowLine - r.baseElevation) / vertical, 0, 1);
   if (c.coldSecurity) rainExposure = Math.min(rainExposure, 0.1); // cold by latitude
@@ -123,6 +126,17 @@ export function computeSeasonalScore(r: Resort, opts: SeasonalOpts = {}): Season
   const oni = opts.oni ?? CURRENT_ONI;
   const c = CLIMATE[r.id];
 
+  // Seasonality: the curve scales the mid-winter peak down for any other date.
+  // No date → deep-winter peak (sf = 1, no snow-line shift), keeping the engine's
+  // climatological reference intact.
+  let sf = 1, sls = 0;
+  if (opts.targetDate) {
+    const m = Number(opts.targetDate.slice(5, 7));
+    const d = Number(opts.targetDate.slice(8, 10));
+    sf = seasonalFactor(m, d);
+    sls = snowlineShift(m, d);
+  }
+
   const sources: string[] = ["climatologia recente (5 anos)", "análogo de ENSO"];
   const recent = recentEstimate(r.id);
   const estimators: Estimator[] = [recent, analogEstimate(r.id, oni)];
@@ -141,15 +155,16 @@ export function computeSeasonalScore(r: Resort, opts: SeasonalOpts = {}): Season
   }
 
   const fused = fuse(estimators);
+  // Apply the seasonal curve: peak-winter estimate scaled to the target date.
+  let sd = Math.sqrt(fused.var) * sf;
+  const expectedBase = Math.max(0, fused.mean) * sf;
   // Honest-uncertainty floor: a seasonal outlook (no live forecast yet) can't be
   // narrow. The band only tightens once a real forecast enters the window.
-  let sd = Math.sqrt(fused.var);
-  const expectedBase = Math.max(0, fused.mean);
   if (opts.forecastBase == null) sd = Math.max(sd, 0.18 * expectedBase);
   const low = Math.max(0, expectedBase - sd);
   const high = expectedBase + sd;
 
-  const { qual, rainExposure, expectedSnowLine } = geographicQuality(c, r, oni);
+  const { qual, rainExposure, expectedSnowLine } = geographicQuality(c, r, oni, sls);
   const score = baseToScore(expectedBase, qual);
   const scoreLow = baseToScore(low, qual);
   const scoreHigh = baseToScore(high, qual);
@@ -157,9 +172,9 @@ export function computeSeasonalScore(r: Resort, opts: SeasonalOpts = {}): Season
   const relWidth = sd / Math.max(expectedBase, 1);
   const confidence: Confidence = relWidth < 0.16 ? "alta" : relWidth < 0.3 ? "média" : "baixa";
 
-  const normalBase = recent.mean;
+  const normalBase = recent.mean * sf;
   const anomaly = expectedBase - normalBase;
-  const aboveThresh = 0.3 * c.sd;
+  const aboveThresh = 0.3 * c.sd * sf;
   let tag: string, tone: Tone;
   if (confidence === "baixa") { tag = "Variável"; tone = "warn"; }
   else if (anomaly > aboveThresh) { tag = "Acima do normal"; tone = "good"; }
@@ -178,6 +193,20 @@ export function computeSeasonalScore(r: Resort, opts: SeasonalOpts = {}): Season
     qual: Math.round(qual * 100) / 100,
     rainExposure: Math.round(rainExposure * 100) / 100,
     expectedSnowLine: Math.round(expectedSnowLine),
+    seasonFactor: Math.round(sf * 100) / 100,
     sources,
   };
+}
+
+/** Season-long curve of the expected score for a resort — drives the detail chart. */
+export function monthlyOutlook(r: Resort, oni: number = CURRENT_ONI) {
+  const months = [
+    { m: 5, label: "Mai" }, { m: 6, label: "Jun" }, { m: 7, label: "Jul" },
+    { m: 8, label: "Ago" }, { m: 9, label: "Set" }, { m: 10, label: "Out" },
+    { m: 11, label: "Nov" },
+  ];
+  return months.map(({ m, label }) => {
+    const res = computeSeasonalScore(r, { oni, targetDate: `2026-${String(m).padStart(2, "0")}-15` });
+    return { label, month: m, score: res.score, base: res.expectedBase, low: res.low, high: res.high };
+  });
 }

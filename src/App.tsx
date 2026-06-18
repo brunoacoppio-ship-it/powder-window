@@ -1,8 +1,10 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 import { REGIONS } from "./data/resorts";
 import { useSeasonalOutlook } from "./hooks/useSeasonalOutlook";
 import { ResortOutlookCard } from "./components/ResortOutlookCard";
 import { EnsoBanner } from "./components/EnsoBanner";
+import { ResortMap } from "./components/ResortMap";
+import { DetailPanel } from "./components/DetailPanel";
 
 const today = new Date().toISOString().slice(0, 10);
 const maxDate = new Date();
@@ -10,41 +12,53 @@ maxDate.setFullYear(maxDate.getFullYear() + 1);
 const maxDateStr = maxDate.toISOString().slice(0, 10);
 
 const inputStyle: CSSProperties = {
-  font: "inherit", fontSize: 14, color: "var(--ink)", background: "var(--surface)",
-  border: "1px solid var(--line-strong)", borderRadius: 9, padding: "7px 11px", cursor: "pointer",
+  font: "inherit", fontSize: 14, color: "var(--ink)", background: "var(--surface-2)",
+  border: "1px solid var(--line-strong)", borderRadius: 10, padding: "8px 12px", cursor: "pointer",
 };
 
 function horizonLabel(leadDays: number, mode: "forecast" | "seasonal"): string {
   if (leadDays < 0) return "data no passado";
-  if (mode === "forecast") return `${leadDays} dias à frente — dados reais do Open-Meteo`;
+  if (mode === "forecast") return `${leadDays} dias à frente · previsão real Open-Meteo`;
   const weeks = Math.round(leadDays / 7);
-  return `~${weeks} semanas à frente — outlook sazonal (ENSO + climatologia)`;
+  return `~${weeks} semanas à frente · modelo sazonal (ENSO + climatologia)`;
 }
 
 export default function App() {
   const [targetDate, setTargetDate] = useState(today);
   const [region, setRegion] = useState<string | null>(null);
   const { rows, loading, progress, mode, leadDays } = useSeasonalOutlook(targetDate, region);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Keep a valid selection: default to the top-ranked resort
+  useEffect(() => {
+    if (rows.length === 0) { setSelectedId(null); return; }
+    if (!selectedId || !rows.some((r) => r.resort.id === selectedId)) {
+      setSelectedId(rows[0].resort.id);
+    }
+  }, [rows, selectedId]);
+
+  const selected = rows.find((r) => r.resort.id === selectedId) ?? null;
 
   return (
-    <div style={{ maxWidth: 860, margin: "0 auto", padding: "44px 22px 64px" }}>
-      <header style={{ marginBottom: 26 }}>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "40px 24px 70px" }}>
+      {/* Header */}
+      <header style={{ marginBottom: 22 }}>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
           <div>
-            <h1 style={{ fontFamily: "var(--font-display)", fontSize: 34, fontWeight: 600, letterSpacing: "-0.02em", margin: 0, lineHeight: 1.05 }}>
-              Powder Window
-            </h1>
-            <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: 15 }}>
-              Condições de neve nos Andes — previsão real ou outlook sazonal.
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 32 }}>🏔️</span>
+              <h1 style={{ fontFamily: "var(--font-display)", fontSize: 38, fontWeight: 700, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 }}>
+                Powder Window
+              </h1>
+            </div>
+            <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: 15 }}>
+              Inteligência de neve nos Andes — previsão real e modelo sazonal.
             </p>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <input
-              type="date"
-              style={inputStyle}
-              value={targetDate}
-              min={today}
-              max={maxDateStr}
+              type="date" style={inputStyle} value={targetDate}
+              min={today} max={maxDateStr}
               onChange={(e) => e.target.value && setTargetDate(e.target.value)}
             />
             <select style={inputStyle} value={region ?? ""} onChange={(e) => setRegion(e.target.value || null)}>
@@ -53,48 +67,61 @@ export default function App() {
             </select>
           </div>
         </div>
-        <div style={{ marginTop: 14, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--faint)", display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{
-            display: "inline-block", padding: "2px 8px", borderRadius: 999, fontSize: 11,
+            display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 11px", borderRadius: 999,
+            fontFamily: "var(--font-mono)", fontSize: 11.5,
             background: mode === "forecast" ? "var(--blue-soft)" : "var(--amber-soft)",
             color: mode === "forecast" ? "var(--blue-ink)" : "var(--amber-ink)",
           }}>
-            {mode === "forecast" ? "PREVISÃO REAL" : "OUTLOOK SAZONAL"}
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: "currentColor",
+              animation: loading ? "pulse 1s infinite" : undefined }} />
+            {mode === "forecast" ? "PREVISÃO REAL" : "MODELO SAZONAL"}
           </span>
-          <span>{horizonLabel(leadDays, mode)}</span>
-          {loading && (
-            <span style={{ color: "var(--blue)" }}>
-              · carregando {Math.round(progress * 100)}%
-            </span>
-          )}
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--faint)" }}>
+            {horizonLabel(leadDays, mode)}
+            {loading && ` · carregando ${Math.round(progress * 100)}%`}
+          </span>
         </div>
       </header>
 
-      {mode === "seasonal" && <EnsoBanner />}
-
-      {loading && rows.length === 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} style={{
-              height: 90, borderRadius: 14, background: "var(--surface)",
-              border: "1px solid var(--line)", opacity: 0.6,
-            }} />
-          ))}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {rows.map((row) => <ResortOutlookCard key={row.resort.id} row={row} />)}
-        </div>
+      {mode === "seasonal" && (
+        <div style={{ marginBottom: 18 }}><EnsoBanner /></div>
       )}
 
-      <footer style={{ marginTop: 30, paddingTop: 18, borderTop: "1px solid var(--line)", fontSize: 12.5, color: "var(--faint)", lineHeight: 1.6 }}>
-        <p style={{ margin: 0 }}>
-          <strong style={{ fontWeight: 500, color: "var(--muted)" }}>Como a nota é calculada.</strong>{" "}
-          Dentro dos 16 dias: dados reais do Open-Meteo (neve fresca 72h, base, temperatura, linha de neve).
-          Além dos 16 dias: outlook sazonal — climatologia dos últimos 5 anos + análogo de ENSO (histórico
-          re-ponderado por anos similares ao atual) fundidos por inverso da variância.
-          Banda larga = menor confiança.
-        </p>
+      {/* Main grid: list + map, then detail */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.05fr)", gap: 18, alignItems: "start" }}>
+        {/* Left: ranked list */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {loading && rows.length === 0
+            ? Array.from({ length: 7 }).map((_, i) => (
+                <div key={i} className="glass skeleton" style={{ height: 74 }} />
+              ))
+            : rows.map((row) => (
+                <ResortOutlookCard
+                  key={row.resort.id}
+                  row={row}
+                  selected={row.resort.id === selectedId}
+                  onSelect={() => setSelectedId(row.resort.id)}
+                />
+              ))}
+        </div>
+
+        {/* Right: map (sticky) */}
+        <div style={{ position: "sticky", top: 18, display: "flex", flexDirection: "column", gap: 18 }}>
+          <div className="glass" style={{ height: 380, padding: 6, overflow: "hidden" }}>
+            <ResortMap rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
+          </div>
+          {selected && <DetailPanel row={selected} targetDate={targetDate} />}
+        </div>
+      </div>
+
+      <footer style={{ marginTop: 34, paddingTop: 18, borderTop: "1px solid var(--line)", fontSize: 12.5, color: "var(--faint)", lineHeight: 1.6 }}>
+        <strong style={{ fontWeight: 600, color: "var(--muted)" }}>Como a nota é calculada.</strong>{" "}
+        Dentro dos 16 dias: dados reais do Open-Meteo (neve fresca em 72h, base, temperatura, linha de neve).
+        Além dos 16 dias: modelo sazonal — climatologia dos últimos 5 anos + análogo de ENSO (histórico
+        re-ponderado por anos similares ao atual) escalados pela curva da temporada, de modo que cada data
+        do inverno produz um resultado diferente. Banda larga = menor confiança.
       </footer>
     </div>
   );

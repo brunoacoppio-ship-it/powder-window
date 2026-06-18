@@ -44,4 +44,18 @@ describe("seasonal engine", () => {
     expect(ranked.slice(0, 2).sort()).toEqual(["portillo", "valle-nevado"].sort());
     expect(ranked.indexOf("valle-nevado")).toBeLessThan(ranked.indexOf("nevados-chillan"));
   });
+
+  it("varies by date: August peak beats June ramp-up beats October melt", () => {
+    const v = byId("valle-nevado");
+    const june = computeSeasonalScore(v, { targetDate: "2026-06-15" });
+    const august = computeSeasonalScore(v, { targetDate: "2026-08-15" });
+    const october = computeSeasonalScore(v, { targetDate: "2026-10-15" });
+    // Base depth follows the season curve
+    expect(august.expectedBase).toBeGreaterThan(june.expectedBase);
+    expect(june.expectedBase).toBeGreaterThan(october.expectedBase);
+    // Scores must differ across the season (the bug was identical numbers)
+    expect(august.score).not.toBe(october.score);
+    // October's higher snow line raises rain exposure vs deep winter
+    expect(october.expectedSnowLine).toBeGreaterThan(august.expectedSnowLine);
+  });
 });
