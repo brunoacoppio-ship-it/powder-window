@@ -1,4 +1,5 @@
 import { useState, useEffect, Fragment, type CSSProperties } from "react";
+import logoIcon from "./assets/logo-icon.png";
 import { REGIONS } from "./data/resorts";
 import { useSeasonalOutlook } from "./hooks/useSeasonalOutlook";
 import { useMediaQuery } from "./hooks/useMediaQuery";
@@ -82,15 +83,25 @@ export default function App() {
       <header style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-              <span style={{ fontSize: isMobile ? 27 : 32 }}>🏔️</span>
-              <h1 style={{ fontFamily: "var(--font-display)", fontSize: isMobile ? 28 : 38, fontWeight: 700, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 }}>
-                Powder Window
-              </h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <img
+                src={logoIcon}
+                alt="Powder Window"
+                style={{
+                  height: isMobile ? 46 : 58, width: "auto",
+                  mixBlendMode: "screen",
+                  filter: "drop-shadow(0 0 14px rgba(56,189,248,0.25))",
+                }}
+              />
+              <div>
+                <h1 style={{ fontFamily: "var(--font-display)", fontSize: isMobile ? 27 : 36, fontWeight: 700, letterSpacing: "-0.02em", margin: 0, lineHeight: 1 }}>
+                  Powder Window
+                </h1>
+                <p style={{ margin: "5px 0 0", color: "var(--muted)", fontSize: isMobile ? 12.5 : 14 }}>
+                  Real snow data. Better days.
+                </p>
+              </div>
             </div>
-            <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: isMobile ? 13.5 : 15 }}>
-              Inteligência de neve nos Andes — previsão real e modelo sazonal.
-            </p>
           </div>
           <div style={{
             display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
